@@ -17,3 +17,12 @@ const UsersSessionController = () => import('#controllers/users/session_controll
 router.get('login', [UsersSessionController, 'create']).use(middleware.guest())
 router.post('login', [UsersSessionController, 'store'])
 router.delete('logout', [UsersSessionController, 'destroy']).use(middleware.auth())
+
+const GithubController = () => import('#controllers/github_controller')
+
+router
+  .group(() => {
+    router.get('redirect', [GithubController, 'redirect'])
+    router.get('callback', [GithubController, 'callback'])
+  })
+  .prefix('github')

@@ -434,3 +434,213 @@ export default function Home({ user }: { user: User }) {
 }
 
 ```
+
+
+## Social Authenticaiton（GitHub）
+
+```bash
+node ace add @adonisjs/ally --providers=github
+```
+
+## Configuration
+
+```ts
+import env from '#start/env'
+import { defineConfig, services } from '@adonisjs/ally'
+
+const allyConfig = defineConfig({
+  github: services.github({
+    clientId: env.get('GITHUB_CLIENT_ID'),
+    clientSecret: env.get('GITHUB_CLIENT_SECRET'),
+    callbackUrl: '',
+  }),
+})
+
+export default allyConfig
+
+declare module '@adonisjs/ally/types' {
+  interface SocialProviders extends InferSocialProviders<typeof allyConfig> {}
+}
+```
+
+https://github.com/settings/applications/new でOAuth Appを作成し、`GITHUB_CLIENT_ID`と`GITHUB_CLIENT_SECRET`を取得します。
+
+- Homepage URL: http://localhost:3333
+- Authorization callback URL: http://localhost:3333/github/callback
+
+と設定します。
+
+```bash
+node ace make:controller social
+```
+
+```ts
+node ace make:controller github -s
+```
+
+app/controllers/github_controller.ts:
+```ts
+import User from '#models/user'
+import type { HttpContext } from '@adonisjs/core/http'
+
+export default class GithubController {
+  redirect({ ally }: HttpContext) {
+    return ally.use('github').redirect((req) => {
+      req.scopes(['user'])
+    })
+  }
+
+  async callback({ ally, auth, response, session }: HttpContext) {
+    const github = ally.use('github')
+    if (github.accessDenied()) {
+      session.flash('error', 'Access was denied')
+      return response.redirect().toPath('/login')
+    }
+
+    if (github.stateMisMatch()) {
+      session.flash('error', 'Request expired. Retry again')
+      return response.redirect().toPath('/login')
+    }
+
+    if (github.hasError()) {
+      session.flash('error', 'Unable to authenticate. Retry again')
+      return response.redirect().toPath('/login')
+    }
+
+    const githubUser = await github.user()
+    const user = await User.firstOrCreate(
+      {
+        email: githubUser.email,
+      },
+      {
+        email: githubUser.email,
+        fullName: githubUser.name,
+      }
+    )
+
+    await auth.use('web').login(user)
+    session.flash('success', 'Logged in successfully')
+    return response.redirect().toPath('/')
+  }
+}
+
+```
+
+start/routes.ts:
+```ts
+const GithubController = () => import('#controllers/github_controller')
+
+router
+  .group(() => {
+    router.get('redirect', [GithubController, 'redirect'])
+    router.get('callback', [GithubController, 'callback'])
+  })
+  .prefix('github')
+
+```
+
+passwordをnullabeに変更します
+
+```bash
+node ace make:migration User --alter
+```
+
+database/migrations/1726646431580_alter_users_table.ts:
+```ts
+import { BaseSchema } from '@adonisjs/lucid/schema'
+
+export default class extends BaseSchema {
+  protected tableName = 'users'
+
+  async up() {
+    this.schema.alterTable(this.tableName, (table) => {
+      table.setNullable('password')
+    })
+  }
+
+  async down() {
+    this.schema.alterTable(this.tableName, (table) => {
+      table.dropNullable('password')
+    })
+  }
+}
+
+```
+
+
+```bash
+node ace migration:run
+```
+
+ログイン画面にGitHubログインボタンを追加します。
+
+inertia/pages/users/login.tsx:
+```tsx
+import { Head, router } from '@inertiajs/react'
+import { useState } from 'react'
+
+export default function Login() {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+
+  const handleLogin = (event: React.FormEvent) => {
+    event.preventDefault()
+    router.post(`/login`, {
+      password,
+      email,
+    })
+  }
+
+  const handleGitHubLogin = () => {
+    window.location.href = '/github/redirect'
+  }
+
+  return (
+    <>
+      <Head title="Login" />
+      <div className="flex items-center justify-center min-h-screen bg-gray-100">
+        <div className="w-full max-w-md p-8 space-y-6 bg-white rounded shadow-md">
+          <h2 className="text-2xl font-bold text-center">Login</h2>
+          <form method="post" action="/login" onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Email</label>
+              <input
+                type="email"
+                name="email"
+                onChange={(e) => setEmail(e.target.value)}
+                value={email}
+                className="w-full px-3 py-2 mt-1 border border-gray-300 rounded shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Password</label>
+              <input
+                type="password"
+                name="password"
+                onChange={(e) => setPassword(e.target.value)}
+                value={password}
+                className="w-full px-3 py-2 mt-1 border border-gray-300 rounded shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full px-4 py-2 font-bold text-white bg-indigo-600 rounded hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
+              Login
+            </button>
+          </form>
+          <div className="text-center">OR</div>
+          <button
+            onClick={handleGitHubLogin}
+            className="w-full px-4 py-2 font-bold text-white bg-gray-800 rounded hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+          >
+            Login with GitHub
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
+```
+

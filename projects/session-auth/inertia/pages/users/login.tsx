@@ -1,7 +1,10 @@
+import SessionController from '#controllers/users/session_controller'
+import { InferPageProps } from '@adonisjs/inertia/types'
 import { Head, router } from '@inertiajs/react'
 import { useState } from 'react'
 
-export default function Login() {
+export default function Login(props: InferPageProps<SessionController, 'create'>) {
+  const { error } = props
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
@@ -21,6 +24,11 @@ export default function Login() {
     <>
       <Head title="Login" />
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
+        {error && (
+          <div className="absolute top-0 left-0 right-0 p-4 bg-red-500 text-white text-center">
+            {error}
+          </div>
+        )}
         <div className="w-full max-w-md p-8 space-y-6 bg-white rounded shadow-md">
           <h2 className="text-2xl font-bold text-center">Login</h2>
           <form method="post" action="/login" onSubmit={handleLogin} className="space-y-4">

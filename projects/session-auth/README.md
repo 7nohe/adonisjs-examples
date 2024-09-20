@@ -215,26 +215,35 @@ export default class SessionController {
     return inertia.render('users/login')
   }
 
-  async store({ request, auth, response }: HttpContext) {
+  async store({ request, auth, response, session }: HttpContext) {
     /**
      * Step 1: Get credentials from the request body
      */
     const { email, password } = request.only(['email', 'password'])
 
-    /**
-     * Step 2: Verify credentials
-     */
-    const user = await User.verifyCredentials(email, password)
+    try {
+      /**
+       * Step 2: Verify credentials
+       */
+      const user = await User.verifyCredentials(email, password)
 
-    /**
-     * Step 3: Login user
-     */
-    await auth.use('web').login(user)
+      /**
+       * Step 3: Login user
+       */
+      await auth.use('web').login(user)
 
-    /**
-     * Step 4: Send them to a protected route
-     */
-    response.redirect('/')
+      /**
+       * Step 4: Send them to a protected route
+       */
+      session.flash('success', 'Logged in successfully')
+      response.redirect('/')
+    } catch (error) {
+      /**
+       * Step 5: Handle login errors
+       */
+      session.flash('error', "Incorrect email or password")
+      response.redirect('/login')
+    }
   }
 
   async destroy({ auth, response }: HttpContext) {
@@ -267,6 +276,28 @@ router.delete('logout', [UsersSessionController, 'destroy'])
 
 ```bash
 node ace list:routes
+```
+
+Homeのコントローラも用意します。
+
+```bash
+node ace make:controller home
+```
+
+```ts
+import type { HttpContext } from '@adonisjs/core/http'
+
+export default class HomeController {
+  async index({ inertia }: HttpContext) {
+    return inertia.render('home')
+  }
+}
+```
+
+start/routes.ts:
+```ts
+const HomeController = () => import('#controllers/home_controller')
+router.get('/', [HomeController, 'index'])
 ```
 
 ## Middleware
@@ -321,9 +352,11 @@ start/routes.ts:
 import router from '@adonisjs/core/services/router'
 import { middleware } from './kernel.js'
 
+const HomeController = () => import('#controllers/home_controller')
 router.on('/').renderInertia('home').use(middleware.auth())
 
 const UsersSessionController = () => import('#controllers/users/session_controller')
+router.get('/', [HomeController, 'index']).use(middleware.auth())
 
 router.get('login', [UsersSessionController, 'create']).use(middleware.guest())
 router.post('login', [UsersSessionController, 'store'])
@@ -341,10 +374,13 @@ router.delete('logout', [UsersSessionController, 'destroy']).use(middleware.auth
 
 inertia/pages/users/login.tsx:
 ```tsx
+import SessionController from '#controllers/users/session_controller'
+import { InferPageProps } from '@adonisjs/inertia/types'
 import { router } from '@inertiajs/react'
 import { useState } from 'react'
 
-export default function Login() {
+export default function Login(props: InferPageProps<SessionController, 'create'>) {
+  const { error } = props
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
@@ -358,6 +394,11 @@ export default function Login() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-100">
+      {error && (
+          <div className="absolute top-0 left-0 right-0 p-4 bg-red-500 text-white text-center">
+            {error}
+          </div>
+        )}
       <div className="w-full max-w-md p-8 space-y-6 bg-white rounded shadow-md">
         <h2 className="text-2xl font-bold text-center">Login</h2>
         <form method="post" action="/login" onSubmit={handleSubmit} className="space-y-4">
@@ -397,17 +438,29 @@ export default function Login() {
 
 
 inertia/pages/home.tsx:
-
 ```tsx
-import User from '#models/user'
+
+import HomeController from '#controllers/home_controller'
+import { InferPageProps } from '@adonisjs/inertia/types'
 import { Head, Link } from '@inertiajs/react'
 
-export default function Home({ user }: { user: User }) {
+export default function Home(props: InferPageProps<HomeController, 'index'>) {
+  const { user, error, success } = props
   return (
     <>
       <Head title="Homepage" />
 
       <div className="pt-4 h-full flex flex-col">
+        {error && (
+          <div className="absolute top-0 left-0 right-0 p-4 bg-red-500 text-white text-center">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="absolute top-0 left-0 right-0 p-4 bg-green-500 text-white text-center">
+            {success}
+          </div>
+        )}
         {/* Header */}
         <div className="grow pb-4 bg-gradient-to-b from-sand-1 to-sand-2 flex justify-between items-center px-16 xl:px-8">
           <Link href="/" className="text-lg font-semibold text-primary" as="button">
@@ -425,13 +478,61 @@ export default function Home({ user }: { user: User }) {
 
         <div className="grow flex flex-col items-center justify-center">
           <h2 className="text-4xl font-bold text-center text-sand-8 xl:text-6xl">
-            Welcome back, {user.fullName}!
+            Welcome back, {user?.fullName}!
           </h2>
         </div>
       </div>
     </>
   )
 }
+
+```
+
+SharedPropsの型定義を追加します。
+
+config/inertia.ts:
+```ts
+import User from '#models/user'
+import { defineConfig } from '@adonisjs/inertia'
+import type { InferSharedProps } from '@adonisjs/inertia/types'
+
+class UserDto {
+  constructor(private user: User) { }
+
+  toJson() {
+    return {
+      id: this.user.id,
+      fullName: this.user.fullName,
+      email: this.user.email,
+    }
+  }
+}
+
+const inertiaConfig = defineConfig({
+  /**
+   * Path to the Edge view that will be used as the root view for Inertia responses
+   */
+  rootView: 'inertia_layout',
+
+  /**
+   * Data that should be shared with all rendered pages
+   */
+  sharedData: {
+    user: (ctx) => ctx.auth.user ? new UserDto(ctx.auth.user).toJson() : null,
+    error: (ctx) => ctx.session.flashMessages.get('error') as string | undefined,
+    success: (ctx) => ctx.session.flashMessages.get('success') as string | undefined,
+  },
+
+  /**
+   * Options for the server-side rendering
+   */
+  ssr: {
+    enabled: false,
+    entrypoint: 'inertia/app/ssr.tsx',
+  },
+})
+
+export default inertiaConfig
 
 ```
 

@@ -1,5 +1,18 @@
+import User from '#models/user'
 import { defineConfig } from '@adonisjs/inertia'
 import type { InferSharedProps } from '@adonisjs/inertia/types'
+
+class UserDto {
+  constructor(private user: User) { }
+
+  toJson() {
+    return {
+      id: this.user.id,
+      fullName: this.user.fullName,
+      email: this.user.email,
+    }
+  }
+}
 
 const inertiaConfig = defineConfig({
   /**
@@ -11,8 +24,9 @@ const inertiaConfig = defineConfig({
    * Data that should be shared with all rendered pages
    */
   sharedData: {
-    errors: (ctx) => ctx.session?.flashMessages.get('errors'),
-    user: (ctx) => ctx.auth?.user,
+    user: (ctx) => ctx.auth.user ? new UserDto(ctx.auth.user).toJson() : null,
+    error: (ctx) => ctx.session.flashMessages.get('error') as string | undefined,
+    success: (ctx) => ctx.session.flashMessages.get('success') as string | undefined,
   },
 
   /**
@@ -27,5 +41,5 @@ const inertiaConfig = defineConfig({
 export default inertiaConfig
 
 declare module '@adonisjs/inertia/types' {
-  export interface SharedProps extends InferSharedProps<typeof inertiaConfig> {}
+  export interface SharedProps extends InferSharedProps<typeof inertiaConfig> { }
 }
